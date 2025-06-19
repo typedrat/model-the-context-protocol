@@ -1,3 +1,4 @@
+import type { Progress } from "fastmcp";
 import scryfall from "scryfall-client";
 import { z } from "zod";
 import { decks } from "./mtg-deck";
@@ -127,7 +128,7 @@ export const getDeckScryfallData = {
     deck_name: string;
     include_quantity?: boolean;
     unique_only?: boolean;
-  }, { reportProgress }) => {
+  }, { reportProgress }: { reportProgress: (progress: Progress) => Promise<void> }) => {
     const { deck_name, include_quantity = true, unique_only = false } = arguments_;
 
     try {
