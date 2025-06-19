@@ -1,0 +1,11 @@
+{
+  "extends": ["@tsconfig/strictest/tsconfig", "@tsconfig/bun/tsconfig"],
+  "exclude": ["eslint.config.js"],
+  "compilerOptions": {
+    "exactOptionalPropertyTypes": false,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}
