@@ -1,116 +1,322 @@
 import type { Progress } from "fastmcp";
-import scryfall from "scryfall-client";
 import { z } from "zod";
 import { decks } from "./mtg-deck";
+import {
+  clearScryfallCache,
+  getScryfallCacheStats,
+  getScryfallCardById,
+  getScryfallCardByName,
+  getScryfallRandomCard,
+  searchScryfallCards,
+  type ScryfallCard,
+} from "./scryfall-service";
 
-// Set user agent as required by Scryfall API
-scryfall.setUserAgent("model-the-context-protocol/0.1.0");
+// Utility function to filter card data to essential fields only (reduce LLM context)
+function filterCardData(card: ScryfallCard) {
+  return {
+    name: card.name,
+    mana_cost: card.mana_cost,
+    cmc: card.cmc,
+    type_line: card.type_line,
+    oracle_text: card.oracle_text,
+    power: card.power,
+    toughness: card.toughness,
+    loyalty: card.loyalty,
+    set: card.set,
+    set_name: card.set_name,
+    rarity: card.rarity,
+    prices: card.prices,
+    scryfall_uri: card.scryfall_uri,
+  };
+}
 
-// Schema for Card JSON input
-const CardJsonSchema = z.object({
-  name: z.string(),
-  quantity: z.number().optional(),
-  extension: z.string().optional(),
-  number: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-});
+export const queryScryfallCards = {
+  name: "query_scryfall_cards",
+  description: `Direct Scryfall query using their comprehensive search syntax.
 
-// Schema for search input - either a string name or Card JSON
-const SearchInputSchema = z.union([
-  z.string(),
-  CardJsonSchema,
-]);
+COLORS & COLOR IDENTITY:
+• c:/color: - Color (w,u,b,r,g,c=colorless,m=multicolor)
+• id:/identity: - Color identity
+• Guilds: azorius, dimir, rakdos, gruul, selesnya, orzhov, izzet, golgari, boros, simic
+• Shards: bant, esper, grixis, jund, naya
+• Wedges: abzan, jeskai, sultai, mardu, temur
+• Four-color: chaos, aggression, altruism, growth, artifice
+• Comparisons: c>=uw, id<=esper
 
-export const searchScryfallCard = {
-  name: "search_scryfall_card",
-  description: "Search for Magic: The Gathering cards on Scryfall by name or Card object",
+CARD TYPES:
+• t:/type: - Any supertype, type, or subtype
+• Examples: t:creature, t:legendary, t:goblin, t:instant
+
+CARD TEXT:
+• o:/oracle: - Oracle text search
+• fo:/fulloracle: - Full oracle text (includes reminder text)
+• keyword:/kw: - Keyword abilities
+• Use "quotes" for phrases, ~ for card name placeholder
+
+MANA COSTS & VALUES:
+• m:/mana: - Mana cost symbols ({G}, {2/G}, etc.)
+• mv:/manavalue: - Mana value (mv=3, mv>=4, mv:even, mv:odd)
+• is:hybrid - Hybrid mana symbols
+• is:phyrexian - Phyrexian mana symbols
+• devotion: - Devotion level
+• produces: - Mana production
+
+POWER/TOUGHNESS/LOYALTY:
+• pow:/power: - Power (pow>=8, pow>tou)
+• tou:/toughness: - Toughness
+• pt:/powtou: - Combined power/toughness
+• loy:/loyalty: - Planeswalker loyalty
+
+CARD MECHANICS:
+• is:split, is:flip, is:transform, is:meld, is:leveler, is:dfc, is:mdfc
+• is:spell, is:permanent, is:historic, is:party, is:modal
+• is:vanilla, is:frenchvanilla, is:bear
+
+RARITY:
+• r:/rarity: - common, uncommon, rare, mythic, special, bonus
+• new:rarity - First time at this rarity
+• in:rare - Ever printed at rare
+
+SETS & BLOCKS:
+• s:/e:/set:/edition: - Set code (e:war, s:dom)
+• cn:/number: - Collector number
+• b:/block: - Block code
+• in: - Ever appeared in set
+• st: - Set types (core, expansion, masters, commander, etc.)
+
+FORMAT LEGALITY:
+• f:/format: - Legal formats (standard, modern, legacy, vintage, commander, etc.)
+• banned: - Banned in format
+• restricted: - Restricted in format
+• is:commander, is:brawler, is:companion, is:duelcommander, is:reserved
+
+PRICES:
+• usd:, eur:, tix: - Price ranges (usd>=10.00)
+• cheapest:usd, cheapest:eur, cheapest:tix
+
+VISUAL & META:
+• a:/artist: - Artist name
+• ft:/flavor: - Flavor text
+• wm:/watermark: - Watermark
+• border: - black, white, silver, borderless
+• frame: - 1993, 1997, 2003, 2015, future, legendary, etc.
+• is:full, is:foil, is:nonfoil, is:etched, is:glossy, is:hires
+• game: - paper, mtgo, arena
+• is:promo, is:spotlight, is:digital
+
+SPECIAL SEARCHES:
+• year:/date: - Release year/date (year>=2020, date>=2015-08-18)
+• art:/atag:/arttag: - Art content tags
+• function:/otag:/oracletag: - Function tags
+• is:reprint, not:reprint, is:unique, prints>=5, sets>=10
+• lang:/language: - Language (japanese, any, etc.)
+
+LAND SHORTCUTS:
+• is:dual, is:fetchland, is:shockland, is:checkland, is:fastland
+• is:painland, is:filterland, is:bounceland, is:tangoland
+
+OPERATORS:
+• Negation: -fire (exclude "fire")
+• OR logic: t:fish or t:bird
+• Parentheses: t:legendary (t:goblin or t:elf)
+• Exact names: !lightning bolt
+• Regex: name:/pattern/, o:/^{T}:/
+• Comparisons: >, <, >=, <=, !=, =
+
+DISPLAY OPTIONS:
+• unique:cards/prints/art
+• order:name/cmc/power/rarity/set/usd/etc.
+• direction:asc/desc
+
+Examples:
+• "Lightning Bolt" - Simple name search
+• c:blue t:creature cmc:3 - Blue 3-mana creatures
+• f:modern r>=rare - Modern legal rares/mythics
+• o:"enters tapped" t:land - Lands that enter tapped
+• pow>tou c:red t:creature - Red creatures with power > toughness`,
   parameters: z.object({
-    query: SearchInputSchema.describe("Either a card name string to search for, or a Card JSON object with name and optional set/number info"),
-    exact: z.boolean().optional().describe("Whether to search for exact name match (default: false for fuzzy search)"),
-    set: z.string().optional().describe("Set code to filter results (e.g., 'dom', 'war')"),
-    include_extras: z.boolean().optional().describe("Include extra cards like tokens and art cards"),
+    query: z.string().describe("Scryfall search query using their syntax"),
+    page: z.number().optional().describe("Page number for paginated results (default: 1)"),
+    include_extras: z.boolean().optional().describe("Include extra cards like tokens"),
     include_multilingual: z.boolean().optional().describe("Include non-English cards"),
-    unique: z.enum(["cards", "art", "prints"]).optional().describe("How to handle duplicate cards"),
+    unique: z.enum(["cards", "art", "prints"]).optional().describe("How to handle duplicates"),
   }),
   execute: async (arguments_: {
-    query: string | { name: string; quantity?: number; extension?: string; number?: string; tags?: string[] };
-    exact?: boolean;
-    set?: string;
+    query: string;
+    page?: number;
     include_extras?: boolean;
     include_multilingual?: boolean;
     unique?: "cards" | "art" | "prints";
   }) => {
-    const { query, exact = false, set, include_extras, include_multilingual, unique } = arguments_;
+    const { query, page, include_extras, include_multilingual, unique } = arguments_;
 
     try {
-      let searchName: string;
-      const searchOptions: Record<string, string | boolean | number> = {};
+      const result = await searchScryfallCards(query, {
+        page,
+        include_extras,
+        include_multilingual,
+        unique,
+      });
 
-      // Parse the query input
-      if (typeof query === "string") {
-        searchName = query;
+      // Handle different response formats from Scryfall API
+      let cards: ScryfallCard[] = [];
+      let totalCards = 0;
+      let hasMore = false;
+
+      if (Array.isArray(result)) {
+        // Direct array of cards
+        cards = result;
+        totalCards = result.length;
+        hasMore = false;
       }
-      else {
-        // It's a Card JSON object
-        searchName = query.name;
-
-        // If the Card has extension info, use it as set filter
-        if (query.extension && !set) {
-          searchOptions.set = query.extension;
-        }
+      else if (result && typeof result === "object") {
+        // Object with data property (paginated results)
+        cards = result.data || [];
+        // eslint-disable-next-line unicorn/explicit-length-check
+        totalCards = result.total_cards || result.total_cards || cards.length;
+        hasMore = result.has_more || false;
       }
 
-      // Add search options
-      if (set) searchOptions.set = set;
-      if (include_extras !== undefined) searchOptions.include_extras = include_extras;
-      if (include_multilingual !== undefined) searchOptions.include_multilingual = include_multilingual;
-      if (unique) searchOptions.unique = unique;
-
-      let result;
-
-      if (exact) {
-        // Use exact name search
-        result = await scryfall.getCardNamed(searchName, searchOptions);
-        return JSON.stringify({
-          success: true,
-          cards: [result],
-          total_cards: 1,
-          search_type: "exact_name",
-        });
-      }
-      else {
-        // Use fuzzy search first, fall back to general search if no results
-        try {
-          result = await scryfall.getCardNamed(searchName, {
-            ...searchOptions,
-            kind: "fuzzy",
-          });
-          return JSON.stringify({
-            success: true,
-            cards: [result],
-            total_cards: 1,
-            search_type: "fuzzy_name",
-          });
-        }
-        catch {
-          // If fuzzy search fails, try a general search
-          result = await scryfall.search(searchName, searchOptions);
-          return JSON.stringify({
-            success: true,
-            cards: [...result],
-            total_cards: result.total_cards,
-            has_more: result.has_more,
-            search_type: "general_search",
-          });
-        }
-      }
+      return JSON.stringify({
+        success: true,
+        query_used: query,
+        cards: cards.map(card => filterCardData(card)),
+        total_cards: totalCards,
+        has_more: hasMore,
+      });
     }
     catch (error) {
       return JSON.stringify({
         success: false,
         error: error instanceof Error ? error.message : String(error),
-        cards: [],
-        total_cards: 0,
+        query_used: query,
+      });
+    }
+  },
+};
+
+export const getScryfallCard = {
+  name: "get_scryfall_card",
+  description: "Get a specific card by exact name or ID",
+  parameters: z.object({
+    identifier: z.string().describe("Card name or ID"),
+    type: z.enum(["name", "scryfall_id", "multiverse_id", "arena_id", "mtgo_id", "tcg_id"]).default("name").describe("Type of identifier"),
+    set: z.string().optional().describe("Set code if searching by name"),
+    exact: z.boolean().default(false).describe("Use exact name matching (default: fuzzy)"),
+  }),
+  execute: async (arguments_: {
+    identifier: string;
+    type: "name" | "scryfall_id" | "multiverse_id" | "arena_id" | "mtgo_id" | "tcg_id";
+    set?: string;
+    exact: boolean;
+  }) => {
+    const { identifier, type, set, exact } = arguments_;
+
+    try {
+      let result: ScryfallCard;
+
+      if (type === "name") {
+        result = await getScryfallCardByName(identifier, {
+          kind: exact ? "exact" : "fuzzy",
+          set,
+        });
+      }
+      else {
+        const idType = type === "scryfall_id" ? "scryfall" : type.replace("_id", "") as "multiverse" | "arena" | "mtgo" | "tcg";
+        result = await getScryfallCardById(identifier, idType);
+      }
+
+      return JSON.stringify({
+        success: true,
+        card: filterCardData(result),
+        search_type: type,
+        identifier_used: identifier,
+      });
+    }
+    catch (error) {
+      return JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        search_type: type,
+        identifier_used: identifier,
+      });
+    }
+  },
+};
+
+export const getRandomScryfallCard = {
+  name: "get_random_scryfall_card",
+  description: "Get a random Magic card, optionally matching search criteria",
+  parameters: z.object({
+    search: z.string().optional().describe("Optional search query to filter random results (e.g., 'c:blue t:creature')"),
+  }),
+  execute: async (arguments_: { search?: string }) => {
+    const { search } = arguments_;
+
+    try {
+      const result = await getScryfallRandomCard(search);
+
+      return JSON.stringify({
+        success: true,
+        card: filterCardData(result),
+        search_used: search,
+      });
+    }
+    catch (error) {
+      return JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        search_used: search,
+      });
+    }
+  },
+};
+
+export const clearScryfallCacheData = {
+  name: "clear_scryfall_cache",
+  description: "Clear the Scryfall API cache to free memory or force fresh data",
+  parameters: z.object({}),
+  execute: async () => {
+    try {
+      clearScryfallCache();
+      return JSON.stringify({
+        success: true,
+        message: "Scryfall cache cleared successfully",
+      });
+    }
+    catch (error) {
+      return JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+};
+
+export const getScryfallCacheInfo = {
+  name: "get_scryfall_cache_stats",
+  description: "Get statistics about the Scryfall API cache usage",
+  parameters: z.object({}),
+  execute: async () => {
+    try {
+      const stats = getScryfallCacheStats();
+      return JSON.stringify({
+        success: true,
+        cache_stats: {
+          current_size: stats.size,
+          max_size: stats.maxSize,
+          cache_ttl_minutes: Math.round(stats.ttlMs / (1000 * 60)),
+          entries_by_age: stats.entries.map(entry => ({
+            key: entry.key,
+            age_seconds: Math.round(entry.age / 1000),
+          })),
+        },
+      });
+    }
+    catch (error) {
+      return JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   },
@@ -121,292 +327,90 @@ export const getDeckScryfallData = {
   description: "Get Scryfall card data for every card in a specified deck",
   parameters: z.object({
     deck_name: z.string().describe("Name of the deck to get Scryfall data for"),
-    include_quantity: z.boolean().optional().describe("Include quantity information from the deck (default: true)"),
-    unique_only: z.boolean().optional().describe("Only return unique cards, ignoring quantities (default: false)"),
+    include_quantity: z.boolean().default(true).describe("Include quantity information from the deck"),
+    unique_only: z.boolean().default(false).describe("Only return unique cards, ignoring quantities"),
   }),
   execute: async (arguments_: {
     deck_name: string;
-    include_quantity?: boolean;
-    unique_only?: boolean;
-  }, { reportProgress }: { reportProgress: (progress: Progress) => Promise<void> }) => {
-    const { deck_name, include_quantity = true, unique_only = false } = arguments_;
+    include_quantity: boolean;
+    unique_only: boolean;
+  }, { reportProgress }: { reportProgress?: (progress: Progress) => Promise<void> } = {}) => {
+    const { deck_name, include_quantity, unique_only } = arguments_;
 
-    try {
-      // Get deck from storage
-      const deck = decks.get(deck_name);
-      if (!deck) {
-        return JSON.stringify({
-          success: false,
-          error: `Deck "${deck_name}" does not exist`,
-          deck_name,
-          cards: [],
+    const deck = decks.get(deck_name);
+    if (!deck) {
+      return JSON.stringify({
+        success: false,
+        error: `Deck "${deck_name}" not found`,
+      });
+    }
+
+    const results: Array<{
+      deck_card: {
+        name: string;
+        quantity?: number;
+        extension?: string;
+        number?: string;
+        tags?: string[];
+      };
+      scryfall_data?: ScryfallCard;
+      error?: string;
+    }> = [];
+
+    const uniqueCards = unique_only ? [...new Set(deck.map(card => card.name))] : deck.map(card => card.name);
+    const cardsToProcess = unique_only ? uniqueCards.map(name => deck.find(card => card.name === name)!) : deck;
+
+    let processed = 0;
+    const total = cardsToProcess.length;
+
+    for (const card of cardsToProcess) {
+      if (reportProgress) {
+        await reportProgress({ progress: processed, total });
+      }
+
+      const deckCardData = {
+        name: card.name,
+        ...(include_quantity && { quantity: card.quantity }),
+        ...(card.extension && { extension: card.extension }),
+        ...(card.number && { number: card.number }),
+        ...(card.tags.size > 0 && { tags: [...card.tags] }),
+      };
+
+      try {
+        const scryfallCard = await getScryfallCardByName(card.name, {
+          kind: "fuzzy",
+          set: card.extension,
+        });
+
+        results.push({
+          deck_card: deckCardData,
+          scryfall_data: filterCardData(scryfallCard),
+        });
+      }
+      catch (error) {
+        results.push({
+          deck_card: deckCardData,
+          error: error instanceof Error ? error.message : String(error),
         });
       }
 
-      if (deck.length === 0) {
-        return JSON.stringify({
-          success: true,
-          deck_name,
-          cards: [],
-          total_cards_in_deck: 0,
-          message: "Deck is empty",
-        });
-      }
-
-      const results = [];
-      const errors = [];
-      let processedCount = 0;
-
-      // Report initial progress
-      await reportProgress({
-        progress: 0,
-        total: deck.length,
-      });
-
-      // Process each card in the deck
-      for (const card of deck) {
-        try {
-          // Build search options - prefer set info if available
-          const searchOptions: Record<string, string | boolean | number> = {};
-          if (card.extension) {
-            searchOptions.set = card.extension;
-          }
-
-          let scryfallCard;
-
-          // Try fuzzy name search first, with set info if available
-          try {
-            scryfallCard = await scryfall.getCardNamed(card.name, searchOptions);
-          }
-          catch {
-            // If that fails, try a general search
-            const searchResult = await scryfall.search(card.name, searchOptions);
-            if (searchResult.length > 0) {
-              scryfallCard = searchResult[0]; // Take the first result
-            }
-            else {
-              throw new Error("No results found");
-            }
-          }
-
-          // Add the result with deck context - only include essential data
-          const cardResult = {
-            deck_card: include_quantity ? { name: card.name, quantity: card.quantity } : { name: card.name },
-            scryfall_data: {
-              name: scryfallCard.name,
-              mana_cost: scryfallCard.mana_cost,
-              cmc: scryfallCard.cmc,
-              type_line: scryfallCard.type_line,
-              oracle_text: scryfallCard.oracle_text,
-              set: scryfallCard.set,
-              set_name: scryfallCard.set_name,
-              rarity: scryfallCard.rarity,
-              prices: scryfallCard.prices,
-              scryfall_uri: scryfallCard.scryfall_uri,
-            },
-          };
-
-          // If unique_only is true, check if we already have this card
-          if (unique_only) {
-            const existingIndex = results.findIndex(r =>
-              r.scryfall_data.name === scryfallCard.name
-              && r.scryfall_data.set === scryfallCard.set,
-            );
-            if (existingIndex === -1) {
-              results.push(cardResult);
-            }
-          }
-          else {
-            results.push(cardResult);
-          }
-
-          // Add a small delay to respect Scryfall's rate limits
-          await new Promise(resolve => setTimeout(resolve, 75));
-
-          // Report progress after processing each card
-          processedCount++;
-          await reportProgress({
-            progress: processedCount,
-            total: deck.length,
-          });
-        }
-        catch (error) {
-          errors.push({
-            card_name: card.name,
-            card_set: card.extension,
-            error: error instanceof Error ? error.message : String(error),
-          });
-
-          // Still report progress even if there was an error
-          processedCount++;
-          await reportProgress({
-            progress: processedCount,
-            total: deck.length,
-          });
-        }
-      }
-
-      return JSON.stringify({
-        success: true,
-        deck_name,
-        cards: results,
-        summary: {
-          cards_found: results.length,
-          total_cards_in_deck: deck.reduce((sum, card) => sum + card.quantity, 0),
-          unique_cards_in_deck: deck.length,
-          errors_count: errors.length,
-        },
-        errors: errors.length > 0 ? errors : undefined,
-      });
+      processed++;
     }
-    catch (error) {
-      return JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        deck_name,
-        cards: [],
-      });
+
+    if (reportProgress) {
+      await reportProgress({ progress: total, total });
     }
-  },
-};
 
-export const getScryfallCard = {
-  name: "get_scryfall_card",
-  description: "Get a specific Magic: The Gathering card from Scryfall by ID or exact name",
-  parameters: z.object({
-    identifier: z.string().describe("Card identifier (Scryfall ID, name, etc.)"),
-    kind: z.enum([
-      "scryfall", "multiverse", "arena", "mtgo", "tcg",
-      "fuzzyName", "name", "exactName",
-    ]).optional().describe("Type of identifier (default: scryfall for IDs, fuzzyName for text)"),
-    set: z.string().optional().describe("Set code to specify which printing"),
-  }),
-  execute: async (arguments_: {
-    identifier: string;
-    kind?: "scryfall" | "multiverse" | "arena" | "mtgo" | "tcg" | "fuzzyName" | "name" | "exactName";
-    set?: string;
-  }) => {
-    const { identifier, kind, set } = arguments_;
+    const successCount = results.filter(r => r.scryfall_data).length;
+    const errorCount = results.filter(r => r.error).length;
 
-    try {
-      let result;
-      const options: Record<string, string | boolean | number> = {};
-
-      if (set) options.set = set;
-
-      // Auto-detect kind if not specified
-      let detectedKind = kind;
-      if (!detectedKind) {
-        // If it looks like a UUID, assume scryfall ID
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier)) {
-          detectedKind = "scryfall";
-        }
-        else if (/^\d+$/.test(identifier)) {
-          // If it's all digits, assume multiverse ID
-          detectedKind = "multiverse";
-        }
-        else {
-          // Otherwise assume it's a card name
-          detectedKind = "name";
-        }
-      }
-
-      if (detectedKind === "name" || detectedKind === "fuzzyName") {
-        result = await scryfall.getCardNamed(identifier, options);
-      }
-      else if (detectedKind === "exactName") {
-        result = await scryfall.getCardNamed(identifier, { ...options, kind: "exact" });
-      }
-      else {
-        result = await scryfall.getCard(identifier, detectedKind);
-      }
-
-      return JSON.stringify({
-        success: true,
-        card: result,
-        identifier_used: identifier,
-        kind_used: detectedKind,
-      });
-    }
-    catch (error) {
-      return JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        card: undefined,
-        identifier_used: identifier,
-        kind_used: kind,
-      });
-    }
-  },
-};
-
-export const getRandomScryfallCard = {
-  name: "get_random_scryfall_card",
-  description: "Get a random Magic: The Gathering card from Scryfall, optionally matching search criteria",
-  parameters: z.object({
-    search: z.string().optional().describe("Optional search query to filter random results (e.g., 'c:blue t:creature')"),
-  }),
-  execute: async (arguments_: { search?: string }) => {
-    const { search } = arguments_;
-
-    try {
-      const result = await scryfall.random(search);
-
-      return JSON.stringify({
-        success: true,
-        card: result,
-        search_used: search,
-      });
-    }
-    catch (error) {
-      return JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        card: undefined,
-        search_used: search,
-      });
-    }
-  },
-};
-
-export const convertCardToScryfallSearch = {
-  name: "convert_card_to_scryfall_search",
-  description: "Convert a Card object from the MTG parser to a Scryfall search query",
-  parameters: z.object({
-    card: CardJsonSchema.describe("Card object with name and optional set/number information"),
-  }),
-  execute: async (arguments_: {
-    card: { name: string; quantity?: number; extension?: string; number?: string; tags?: string[] };
-  }) => {
-    const { card } = arguments_;
-
-    try {
-      let searchQuery = `!"${card.name}"`;
-
-      // Add set filter if available
-      if (card.extension) {
-        searchQuery += ` set:${card.extension}`;
-      }
-
-      // Add collector number filter if available
-      if (card.number) {
-        searchQuery += ` number:${card.number}`;
-      }
-
-      return JSON.stringify({
-        success: true,
-        search_query: searchQuery,
-        original_card: card,
-        explanation: "Generated Scryfall search query from Card object. Use this with search_scryfall_card tool.",
-      });
-    }
-    catch (error) {
-      return JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        search_query: "",
-        original_card: card,
-      });
-    }
+    return JSON.stringify({
+      success: true,
+      deck_name,
+      total_cards: total,
+      successful_lookups: successCount,
+      failed_lookups: errorCount,
+      results,
+    });
   },
 };

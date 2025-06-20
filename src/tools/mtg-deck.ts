@@ -451,3 +451,91 @@ export const loadMtgDeck = {
     }
   },
 };
+
+// Helper function to shuffle array (Fisher-Yates algorithm)
+function shuffleArray<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex]!, shuffled[index]!];
+  }
+  return shuffled;
+}
+
+// Helper function to convert deck to individual card instances
+function deckToCardList(cards: Card[]): string[] {
+  const cardList: string[] = [];
+  for (const card of cards) {
+    for (let index = 0; index < card.quantity; index++) {
+      cardList.push(card.name);
+    }
+  }
+  return cardList;
+}
+
+export const simulateHandDraws = {
+  name: "simulate_hand_draws",
+  description: "Simulate drawing opening hands from a deck, with optional additional cards to simulate future draws",
+  parameters: z.object({
+    deck_name: z.string().describe("Name of the deck to simulate draws from"),
+    num_hands: z.number().default(5).describe("Number of sample hands to draw"),
+    hand_size: z.number().default(7).describe("Number of cards in opening hand"),
+    additional_cards: z.number().default(0).describe("Number of additional cards to draw after opening hand (simulating future turns)"),
+  }),
+  execute: async (arguments_: { deck_name: string; num_hands: number; hand_size: number; additional_cards: number }) => {
+    const deck = decks.get(arguments_.deck_name);
+    if (!deck) {
+      throw new Error(`Deck "${arguments_.deck_name}" does not exist`);
+    }
+
+    const totalDeckSize = deck.reduce((sum, card) => sum + card.quantity, 0);
+    const totalCardsNeeded = arguments_.hand_size + arguments_.additional_cards;
+    if (totalCardsNeeded > totalDeckSize) {
+      throw new Error(`Cannot draw ${totalCardsNeeded} cards from deck with only ${totalDeckSize} cards`);
+    }
+
+    const cardList = deckToCardList(deck);
+    const results = [];
+
+    for (let index = 0; index < arguments_.num_hands; index++) {
+      const shuffledDeck = shuffleArray(cardList);
+      const openingHand = shuffledDeck.slice(0, arguments_.hand_size);
+      const additionalDraw = arguments_.additional_cards > 0
+        ? shuffledDeck.slice(arguments_.hand_size, arguments_.hand_size + arguments_.additional_cards)
+        : [];
+
+      // Count card frequencies in opening hand
+      const handCounts: Record<string, number> = {};
+      for (const cardName of openingHand) {
+        handCounts[cardName] = (handCounts[cardName] || 0) + 1;
+      }
+
+      // Count card frequencies in additional draws
+      const additionalCounts: Record<string, number> = {};
+      for (const cardName of additionalDraw) {
+        additionalCounts[cardName] = (additionalCounts[cardName] || 0) + 1;
+      }
+
+      results.push({
+        hand_number: index + 1,
+        opening_hand: handCounts,
+        additional_draws: additionalCounts,
+        total_cards_drawn: totalCardsNeeded,
+      });
+    }
+
+    return JSON.stringify({
+      deck_name: arguments_.deck_name,
+      simulation_params: {
+        num_hands: arguments_.num_hands,
+        hand_size: arguments_.hand_size,
+        additional_cards: arguments_.additional_cards,
+      },
+      deck_info: {
+        total_cards: totalDeckSize,
+        unique_cards: deck.length,
+      },
+      results,
+    });
+  },
+};

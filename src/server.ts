@@ -27,16 +27,26 @@ import {
   formatMtgDeck,
   saveMtgDeck,
   loadMtgDeck,
+  simulateHandDraws,
 } from "./tools/mtg-deck";
 
 // Import Scryfall search tools
 import {
-  searchScryfallCard,
+  queryScryfallCards,
   getDeckScryfallData,
   getScryfallCard,
   getRandomScryfallCard,
-  convertCardToScryfallSearch,
+  clearScryfallCacheData,
+  getScryfallCacheInfo,
 } from "./tools/scryfall-search";
+
+// Import MTG analytics tools
+import {
+  calculateHypergeometric,
+  analyzeConsistency,
+  analyzeDeckCurve,
+  calculateDeckStats,
+} from "./tools/mtg-analytics";
 
 // Register all MTG deck tools
 server.addTool(createDeck);
@@ -52,10 +62,18 @@ server.addTool(parseMtgDeckToSlot);
 server.addTool(formatMtgDeck);
 server.addTool(saveMtgDeck);
 server.addTool(loadMtgDeck);
+server.addTool(simulateHandDraws);
 
 // Register Scryfall search tools
-server.addTool(searchScryfallCard);
+server.addTool(queryScryfallCards);
 server.addTool(getDeckScryfallData);
 server.addTool(getScryfallCard);
 server.addTool(getRandomScryfallCard);
-server.addTool(convertCardToScryfallSearch);
+server.addTool(clearScryfallCacheData);
+server.addTool(getScryfallCacheInfo);
+
+// Register MTG analytics tools
+server.addTool(calculateHypergeometric);
+server.addTool(analyzeConsistency);
+server.addTool(analyzeDeckCurve);
+server.addTool(calculateDeckStats);
