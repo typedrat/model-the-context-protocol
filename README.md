@@ -15,6 +15,13 @@ This MCP server gives AI assistants the ability to:
 
 ### Installation
 
+**Option 1: Direct from GitHub (easiest):**
+```bash
+# No installation needed! Run directly with bunx
+bunx github:username/model-the-context-protocol
+```
+
+**Option 2: Clone and run locally:**
 ```bash
 # Clone the repository
 git clone <repository-url>
@@ -28,11 +35,19 @@ bun install
 
 **For Claude Desktop (recommended):**
 ```bash
+# If using bunx from GitHub:
+bunx github:username/model-the-context-protocol
+
+# If cloned locally:
 bun run src/index.ts
 ```
 
 **For HTTP clients:**
 ```bash
+# If using bunx from GitHub:
+bunx github:username/model-the-context-protocol http --port 8080
+
+# If cloned locally:
 bun run src/index.ts http --port 8080
 ```
 
@@ -40,6 +55,20 @@ bun run src/index.ts http --port 8080
 
 Add this to your Claude Desktop config file:
 
+**If using bunx from GitHub:**
+```json
+{
+  "mcpServers": {
+    "mtg-deck-manager": {
+      "command": "bunx",
+      "args": ["github:username/model-the-context-protocol"],
+      "env": {}
+    }
+  }
+}
+```
+
+**If cloned locally:**
 ```json
 {
   "mcpServers": {

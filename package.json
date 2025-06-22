@@ -4,6 +4,9 @@
   "license": "MIT",
   "type": "module",
   "module": "src/index.ts",
+  "bin": {
+    "mtg-mcp": "src/index.ts"
+  },
   "scripts": {
     "lint": "eslint .",
     "postinstall": "bun2nix -o bun.nix"
